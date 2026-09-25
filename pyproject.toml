@@ -1,0 +1,11 @@
+[project]
+name = "lakeflow-pipeline"
+version = "0.1.0"
+description = "Transform logic for a Databricks LakeFlow medallion pipeline"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -p no:cacheprovider"
+filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]

@@ -1,0 +1,81 @@
+# Databricks Asset Bundle: deploys the declarative pipeline and an orchestration job.
+#   databricks bundle validate
+#   databricks bundle deploy            # target "dev" by default
+#   databricks bundle run lakeflow_medallion_job
+bundle:
+  name: lakeflow_medallion_pipeline
+
+variables:
+  catalog:
+    description: Catalog for all tables and volumes
+    default: workspace
+  schema:
+    description: Schema for source volumes and notebook-built tables (the pipeline uses <schema>_dlt)
+    default: lakeflow_demo
+
+targets:
+  dev:
+    mode: development   # prefixes resource names with [dev <user>] and pauses schedules
+    default: true
+  # prod:
+  #   mode: production
+  #   workspace:
+  #     host: https://<your-workspace-host>
+  #   run_as:
+  #     service_principal_name: <service-principal-application-id>
+
+resources:
+  pipelines:
+    lakeflow_medallion:
+      name: lakeflow_medallion_pipeline
+      catalog: ${var.catalog}
+      schema: ${var.schema}_dlt
+      serverless: true
+      libraries:
+        - notebook:
+            path: ./notebooks/04_declarative_pipeline/04_medallion_pipeline.py
+      configuration:
+        bundle.sourcePath: ${workspace.file_path}/src
+        source_catalog: ${var.catalog}
+        source_schema: ${var.schema}
+
+  jobs:
+    lakeflow_medallion_job:
+      name: lakeflow_medallion_job
+      parameters:        # passed to every notebook as the catalog / schema widgets
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+      tasks:
+        - task_key: generate_data
+          notebook_task:
+            notebook_path: ./notebooks/00_setup/00_generate_data.py
+        - task_key: bronze_csv
+          depends_on: [{task_key: generate_data}]
+          notebook_task:
+            notebook_path: ./notebooks/01_bronze/01a_autoloader_csv.py
+        - task_key: bronze_json
+          depends_on: [{task_key: generate_data}]
+          notebook_task:
+            notebook_path: ./notebooks/01_bronze/01b_autoloader_json.py
+        - task_key: silver
+          depends_on: [{task_key: bronze_csv}, {task_key: bronze_json}]
+          notebook_task:
+            notebook_path: ./notebooks/03_silver/03_silver_transform.py
+        - task_key: gold
+          depends_on: [{task_key: silver}]
+          notebook_task:
+            notebook_path: ./notebooks/05_gold/05_gold_analytics.py
+        - task_key: cdc
+          depends_on: [{task_key: generate_data}]
+          notebook_task:
+            notebook_path: ./notebooks/07_cdc/07_cdc_scd.py
+        - task_key: declarative_pipeline
+          depends_on: [{task_key: generate_data}]
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.lakeflow_medallion.id}
+        - task_key: tests
+          depends_on: [{task_key: gold}, {task_key: cdc}]
+          notebook_task:
+            notebook_path: ./notebooks/08_testing/08_run_tests.py
